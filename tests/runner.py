@@ -261,9 +261,10 @@ process(sys.argv[1])
       if cache and self.library_cache.get(cache_name):
         print >> sys.stderr,  '<load build from cache> ',
         generated_libs = []
-        for bc_file in self.library_cache[cache_name]:
+        for basename, contents in self.library_cache[cache_name]:
+          bc_file = os.path.join(build_dir, basename)
           f = open(bc_file, 'wb')
-          f.write(self.library_cache[cache_name][bc_file])
+          f.write(contents)
           f.close()
           generated_libs.append(bc_file)
         return generated_libs
@@ -1403,6 +1404,8 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
         self.do_run(src, 'Throw...Construct...Catched...Destruct...Throw...Construct...Copy...Catched...Destruct...Destruct...')
 
     def test_uncaught_exception(self):
+        if self.emcc_args is None: return self.skip('no libcxx inclusion without emcc')
+
         Settings.EXCEPTION_DEBUG = 0  # Messes up expected output.
         Settings.DISABLE_EXCEPTION_CATCHING = 0
 
@@ -3844,6 +3847,38 @@ def process(filename):
       '''
       self.do_run(src, "1 2 3")
 
+    def test_readdir(self):
+    
+      add_pre_run = '''
+def process(filename):
+  src = open(filename, 'r').read().replace(
+	'// {{PRE_RUN_ADDITIONS}}',
+	"FS.createFolder('', 'test', true, true);\\nFS.createLazyFile( 'test', 'some_file', 'http://localhost/some_file', true, false);\\nFS.createFolder('test', 'some_directory', true, true);"
+  )
+  open(filename, 'w').write(src)
+        '''
+
+      src = '''
+        #include <dirent.h>
+        #include <stdio.h>
+        
+        int main()
+        {
+            DIR * dir;
+            dirent * entity;
+        
+            dir = opendir( "test" );
+        
+            while( ( entity = readdir( dir ) ) )
+            {
+                printf( "%s is a %s\\n", entity->d_name, entity->d_type & DT_DIR ? "directory" : "file" );
+            }
+        
+            return 0;
+        }
+
+      '''
+      self.do_run(src, ". is a directory\n.. is a directory\nsome_file is a file\nsome_directory is a directory", post_build=add_pre_run)
 
     def test_fs_base(self):
       Settings.INCLUDE_FULL_LIBRARY = 1
@@ -4372,7 +4407,10 @@ def process(filename):
         del os.environ['EMCC_LEAVE_INPUTS_RAW']
 
     def get_build_dir(self):
-      return os.path.join(self.get_dir(), 'building')
+      ret = os.path.join(self.get_dir(), 'building')
+      if not os.path.exists(ret):
+        os.makedirs(ret)
+      return ret
 
     def get_freetype(self):
       Settings.INIT_STACK = 1 # TODO: Investigate why this is necessary
