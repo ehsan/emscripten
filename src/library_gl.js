@@ -196,22 +196,111 @@ var LibraryGL = {
     }
   },
 
+  glCompressedTexImage2D: function(target, level, internalformat, width, height, border, imageSize, data) {
+    if (data) {
+      data = new Uint8Array(Array_copy(data, imageSize));
+    }
+    Module.ctx.compressedTexImage2D(target, level, internalformat, width, height, border, data);
+  },
+
+  glCompressedTexSubImage2D: function(target, level, xoffset, yoffset, width, height, format, imageSize, data) {
+    if (data) {
+      data = new Uint8Array(Array_copy(data, imageSize));
+    }
+    Module.ctx.compressedTexSubImage2D(target, level, xoffset, yoffset, width, height, data);
+  },
+
   glTexImage2D: function(target, level, internalformat, width, height, border, format, type, pixels) {
     if (pixels) {
-      pixels = new Uint8Array(Array_copy(pixels, pixels + width*height*4)); // TODO: optimize
+      var sizePerComponent;
+      switch (format) {
+        case 0x1906 /* GL_ALPHA */:
+        case 0x1909 /* GL_LUMINANCE */:
+          sizePerComponent = 1;
+          break;
+        case 0x1907 /* GL_RGB */:
+          sizePerComponent = 3;
+          break;
+        case 0x1908 /* GL_RGBA */:
+          sizePerComponent = 4;
+          break;
+        case 0x190A /* GL_LUMINANCE_ALPHA */:
+          sizePerComponent = 2;
+          break;
+        default:
+          throw 'Invalid format (' + format + ') passed to glTexImage2D';
+      }
+      switch (type) {
+        case 0x1401 /* GL_UNSIGNED_BYTE */:
+          pixels = new Uint8Array(Array_copy(pixels, width*height*sizePerComponent));
+          break;
+        case 0x8663 /* GL_UNSIGNED_SHORT_5_6_5 */:
+        case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
+        case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
+          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, width*height*sizePerComponenti*2)));
+          break;
+        default:
+          throw 'Invalid type (' + type + ') passed to glTexImage2D';
+      }
     }
     Module.ctx.texImage2D(target, level, internalformat, width, height, border, format, type, pixels);
   },
 
   glTexSubImage2D: function(target, level, xoffset, yoffset, width, height, format, type, pixels) {
     if (pixels) {
-      pixels = new Uint8Array(Array_copy(pixels, pixels + width*height*4)); // TODO: optimize
+      var sizePerComponent;
+      switch (format) {
+        case 0x1906 /* GL_ALPHA */:
+        case 0x1909 /* GL_LUMINANCE */:
+          sizePerComponent = 1;
+          break;
+        case 0x1907 /* GL_RGB */:
+          sizePerComponent = 3;
+          break;
+        case 0x1908 /* GL_RGBA */:
+          sizePerComponent = 4;
+          break;
+        case 0x190A /* GL_LUMINANCE_ALPHA */:
+          sizePerComponent = 2;
+          break;
+        default:
+          throw 'Invalid format (' + format + ') passed to glTexSubImage2D';
+      }
+      switch (type) {
+        case 0x1401 /* GL_UNSIGNED_BYTE */:
+          pixels = new Uint8Array(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerComponent));
+          break;
+        case 0x8663 /* GL_UNSIGNED_SHORT_5_6_5 */:
+        case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
+        case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
+          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerComponenti*2)));
+          break;
+        default:
+          throw 'Invalid type (' + type + ') passed to glTexSubImage2D';
+      }
     }
     Module.ctx.texSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
   },
 
   glBindTexture: function(target, texture) {
     Module.ctx.bindTexture(target, GL.hashtable("texture").get(texture));
+  },
+
+  glGetTexParameterfv: function(target, pname, params) {
+    {{{ makeSetValue('params', '0', 'Module.getTexParameter(target, pname)', 'float') }}};
+  },
+
+  glGetTexParameteriv: function(target, pname, params) {
+    {{{ makeSetValue('params', '0', 'Module.getTexParameter(target, pname)', 'i32') }}};
+  },
+
+  glIsTexture_deps: ['$GL'],
+  glIsTexture: function(texture) {
+    var fb = GL.hashtable("texture").get(texture);
+    if (typeof(fb) == 'undefined') {
+      return false;
+    }
+    return Module.ctx.isTexture(fb);
   },
 
   glGenBuffers__deps: ['$GL'],
@@ -582,12 +671,13 @@ var LibraryGL = {
 
 // Simple pass-through functions
 [[0, 'shadeModel fogi fogfv getError finish flush'],
- [1, 'clearDepth depthFunc enable disable frontFace cullFace clear enableVertexAttribArray disableVertexAttribArray lineWidth clearStencil depthMask stencilMask stencilMaskSeparate checkFramebufferStatus'],
+ [1, 'clearDepth depthFunc enable disable frontFace cullFace clear enableVertexAttribArray disableVertexAttribArray lineWidth clearStencil depthMask stencilMask stencilMaskSeparate checkFramebufferStatus generateMipmap'],
  [2, 'pixelStorei vertexAttrib1f depthRange polygonOffset'],
  [3, 'texParameteri texParameterf drawArrays vertexAttrib2f'],
  [4, 'viewport clearColor scissor vertexAttrib3f colorMask renderbufferStorage'],
  [5, 'vertexAttrib4f'],
- [6, 'vertexAttribPointer']].forEach(function(data) {
+ [6, 'vertexAttribPointer'],
+ [8, 'copyTexImage2D copyTexSubImage2D'].forEach(function(data) {
   var num = data[0];
   var names = data[1];
   var args = range(num).map(function(i) { return 'x' + i }).join(', ');
