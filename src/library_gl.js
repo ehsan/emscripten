@@ -741,7 +741,7 @@ var LibraryGL = {
  [4, 'viewport clearColor scissor vertexAttrib3f colorMask renderbufferStorage'],
  [5, 'vertexAttrib4f'],
  [6, 'vertexAttribPointer'],
- [8, 'copyTexImage2D copyTexSubImage2D'].forEach(function(data) {
+ [8, 'copyTexImage2D copyTexSubImage2D']].forEach(function(data) {
   var num = data[0];
   var names = data[1];
   var args = range(num).map(function(i) { return 'x' + i }).join(', ');
