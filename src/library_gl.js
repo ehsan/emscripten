@@ -242,7 +242,7 @@ var LibraryGL = {
         case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
         case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
           sizePerPixel = 2;
-          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, width*height*sizePerPixeli*2)));
+          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, width*height*sizePerPixel*2)));
           break;
         default:
           throw 'Invalid type (' + type + ') passed to glTexImage2D';
@@ -281,7 +281,7 @@ var LibraryGL = {
         case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
         case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
           sizePerPixel = 2;
-          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerPixeli*2)));
+          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerPixel*2)));
           break;
         default:
           throw 'Invalid type (' + type + ') passed to glTexSubImage2D';
