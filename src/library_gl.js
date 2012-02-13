@@ -212,33 +212,33 @@ var LibraryGL = {
 
   glTexImage2D: function(target, level, internalformat, width, height, border, format, type, pixels) {
     if (pixels) {
-      var sizePerComponent;
+      var sizePerPixel;
       switch (type) {
         case 0x1401 /* GL_UNSIGNED_BYTE */:
           switch (format) {
             case 0x1906 /* GL_ALPHA */:
             case 0x1909 /* GL_LUMINANCE */:
-              sizePerComponent = 1;
+              sizePerPixel = 1;
               break;
             case 0x1907 /* GL_RGB */:
-              sizePerComponent = 3;
+              sizePerPixel = 3;
               break;
             case 0x1908 /* GL_RGBA */:
-              sizePerComponent = 4;
+              sizePerPixel = 4;
               break;
             case 0x190A /* GL_LUMINANCE_ALPHA */:
-              sizePerComponent = 2;
+              sizePerPixel = 2;
               break;
             default:
               throw 'Invalid format (' + format + ') passed to glTexImage2D';
           }
-          pixels = new Uint8Array(Array_copy(pixels, width*height*sizePerComponent));
+          pixels = new Uint8Array(Array_copy(pixels, width*height*sizePerPixel));
           break;
         case 0x8663 /* GL_UNSIGNED_SHORT_5_6_5 */:
         case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
         case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
-          sizePerComponent = 2;
-          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, width*height*sizePerComponenti*2)));
+          sizePerPixel = 2;
+          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, width*height*sizePerPixeli*2)));
           break;
         default:
           throw 'Invalid type (' + type + ') passed to glTexImage2D';
@@ -249,33 +249,33 @@ var LibraryGL = {
 
   glTexSubImage2D: function(target, level, xoffset, yoffset, width, height, format, type, pixels) {
     if (pixels) {
-      var sizePerComponent;
+      var sizePerPixel;
       switch (type) {
         case 0x1401 /* GL_UNSIGNED_BYTE */:
           switch (format) {
             case 0x1906 /* GL_ALPHA */:
             case 0x1909 /* GL_LUMINANCE */:
-              sizePerComponent = 1;
+              sizePerPixel = 1;
               break;
             case 0x1907 /* GL_RGB */:
-              sizePerComponent = 3;
+              sizePerPixel = 3;
               break;
             case 0x1908 /* GL_RGBA */:
-              sizePerComponent = 4;
+              sizePerPixel = 4;
               break;
             case 0x190A /* GL_LUMINANCE_ALPHA */:
-              sizePerComponent = 2;
+              sizePerPixel = 2;
               break;
             default:
               throw 'Invalid format (' + format + ') passed to glTexSubImage2D';
           }
-          pixels = new Uint8Array(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerComponent));
+          pixels = new Uint8Array(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerPixel));
           break;
         case 0x8663 /* GL_UNSIGNED_SHORT_5_6_5 */:
         case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
         case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
-          sizePerComponent = 2;
-          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerComponenti*2)));
+          sizePerPixel = 2;
+          pixels = new Uint16Array(new ArrayBuffer(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerPixeli*2)));
           break;
         default:
           throw 'Invalid type (' + type + ') passed to glTexSubImage2D';
