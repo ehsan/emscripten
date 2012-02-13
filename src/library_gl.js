@@ -238,7 +238,7 @@ var LibraryGL = {
           }
           pixels = new Uint8Array(Array_copy(pixels, width*height*sizePerPixel));
           break;
-        case 0x8663 /* GL_UNSIGNED_SHORT_5_6_5 */:
+        case 0x8363 /* GL_UNSIGNED_SHORT_5_6_5 */:
         case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
         case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
           sizePerPixel = 2;
@@ -277,7 +277,7 @@ var LibraryGL = {
           }
           pixels = new Uint8Array(Array_copy(pixels, (width-xoffset+1)*(height-yoffset+1)*sizePerPixel));
           break;
-        case 0x8663 /* GL_UNSIGNED_SHORT_5_6_5 */:
+        case 0x8363 /* GL_UNSIGNED_SHORT_5_6_5 */:
         case 0x8033 /* GL_UNSIGNED_SHORT_4_4_4_4 */:
         case 0x8034 /* GL_UNSIGNED_SHORT_5_5_5_1 */:
           sizePerPixel = 2;
