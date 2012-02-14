@@ -86,6 +86,7 @@ mergeInto(LibraryManager.library, {
 
     surfaces: {},
     events: [],
+    startTime: null,
 
     keyCodes: {
       38:  273, // up arrow
@@ -252,7 +253,13 @@ mergeInto(LibraryManager.library, {
     return 0; // success
   },
 
-  SDL_WasInit: function() { return 0 }, // TODO
+  SDL_WasInit__deps: ['SDL_Init'],
+  SDL_WasInit: function() {
+    if (SDL.startTime === null) {
+      _SDL_Init();
+    }
+    return 1;
+  },
 
   SDL_GetVideoInfo: function() {
     // %struct.SDL_VideoInfo = type { i32, i32, %struct.SDL_PixelFormat*, i32, i32 } - 5 fields of quantum size
