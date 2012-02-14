@@ -158,7 +158,7 @@ mergeInto(LibraryManager.library, {
       {{{ makeSetValue('pixelFormat + SDL.structs.PixelFormat.Amask', '0', '0xff', 'i32') }}}
 
       // Decide if we want to use WebGL or not
-      var useWebGL = (flags & 0x04000000) != 0; // SDL_OPENGL
+      var useWebGL = (flags & 0x00000002) != 0; // SDL_OPENGL
 
       SDL.surfaces[surf] = {
         width: width,
