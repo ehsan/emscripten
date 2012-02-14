@@ -20,9 +20,10 @@
     slouken@libsdl.org
 */
 
-/** @file SDL_types.h
- *  @deprecated Use SDL_stdinc.h instead.
+/**
+ *  @file SDL_byteorder.h
+ *  @deprecated Use SDL_endian.h instead
  */
 
 /* DEPRECATED */
-#include "SDL_stdinc.h"
+#include "SDL_endian.h"
