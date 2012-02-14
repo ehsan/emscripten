@@ -428,6 +428,8 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
         self.do_run(src, output, force_c=True)
 
     def test_i64(self):
+        if Settings.USE_TYPED_ARRAYS != 2: return self.skip('i64 mode 1 requires ta2')
+
         for i64_mode in [0,1]:
           if i64_mode == 0 and Settings.USE_TYPED_ARRAYS != 0: continue # Typed arrays truncate i64
           if i64_mode == 1 and Settings.QUANTUM_SIZE == 1: continue # TODO: i64 mode 1 for q1
@@ -1557,6 +1559,25 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
         self.do_run(src, '*11,74,32,1012*\n*11*\n*22*')
 
     def test_dynamic_cast(self):
+        src = r'''
+          #include <stdio.h>
+
+          struct Support {
+            virtual void f() {
+              printf("f()\n");
+            }
+          };
+
+          struct Derived : Support {
+          };
+
+          int main() {
+            Support * p = new Derived;
+            dynamic_cast<Derived*>(p)->f();
+          }
+        '''
+        self.do_run(src, 'f()\n')
+
         src = '''
           #include <stdio.h>
 
@@ -3279,6 +3300,7 @@ at function.:blag
       self.do_run(src, expected)
 
     def test_parseInt(self):
+      if Settings.USE_TYPED_ARRAYS != 2: return self.skip('i64 mode 1 requires ta2')
       if Settings.QUANTUM_SIZE == 1: return self.skip('Q1 and I64_1 do not mix well yet')
       Settings.I64_MODE = 1 # Necessary to prevent i64s being truncated into i32s, but we do still get doubling
                             # FIXME: The output here is wrong, due to double rounding of i64s!
@@ -3287,7 +3309,7 @@ at function.:blag
       self.do_run(src, expected)
 
     def test_printf(self):
-      if Settings.QUANTUM_SIZE == 1: return self.skip('Q1 and I64_1 do not mix well yet')
+      if Settings.USE_TYPED_ARRAYS != 2: return self.skip('i64 mode 1 requires ta2')
       Settings.I64_MODE = 1
       self.banned_js_engines = [NODE_JS, V8_ENGINE] # SpiderMonkey and V8 do different things to float64 typed arrays, un-NaNing, etc.
       src = open(path_from_root('tests', 'printf', 'test.c'), 'r').read()
@@ -3858,15 +3880,14 @@ def process(filename):
       self.do_run(src, "1 2 3")
 
     def test_readdir(self):
-    
       add_pre_run = '''
 def process(filename):
   src = open(filename, 'r').read().replace(
-	'// {{PRE_RUN_ADDITIONS}}',
-	"FS.createFolder('', 'test', true, true);\\nFS.createLazyFile( 'test', 'some_file', 'http://localhost/some_file', true, false);\\nFS.createFolder('test', 'some_directory', true, true);"
+    '// {{PRE_RUN_ADDITIONS}}',
+    "FS.createFolder('', 'test', true, true);\\nFS.createLazyFile( 'test', 'some_file', 'http://localhost/some_file', true, false);\\nFS.createFolder('test', 'some_directory', true, true);"
   )
   open(filename, 'w').write(src)
-        '''
+'''
 
       src = '''
         #include <dirent.h>
@@ -4663,17 +4684,31 @@ def process(filename):
                       'hello python world!\n[0, 2, 4, 6]\n5\n22\n5.470000',
                       args=['-S', '-c' '''print "hello python world!"; print [x*2 for x in range(4)]; t=2; print 10-3-t; print (lambda x: x*2)(11); print '%f' % 5.47'''])
 
+    def test_lifetime(self):
+      if self.emcc_args is None: return self.skip('test relies on emcc opts')
+
+      try:
+        os.environ['EMCC_LEAVE_INPUTS_RAW'] = '1'
+
+        self.do_ll_run(path_from_root('tests', 'lifetime.ll'), 'hello, world!\n')
+        if '-O1' in self.emcc_args or '-O2' in self.emcc_args:
+          assert 'a18' not in open(os.path.join(self.get_dir(), 'src.cpp.o.js')).read(), 'lifetime stuff and their vars must be culled'
+        else:
+          assert 'a18' in open(os.path.join(self.get_dir(), 'src.cpp.o.js')).read(), "without opts, it's there"
+
+      finally:
+        del os.environ['EMCC_LEAVE_INPUTS_RAW']
+
     # Test cases in separate files. Note that these files may contain invalid .ll!
     # They are only valid enough for us to read for test purposes, not for llvm-as
     # to process.
     def test_cases(self):
+      if Building.LLVM_OPTS: return self.skip("Our code is not exactly 'normal' llvm assembly")
+
       try:
-        self.banned_js_engines = [NODE_JS] # node issue 1669, exception causes stdout not to be flushed
-
         os.environ['EMCC_LEAVE_INPUTS_RAW'] = '1'
-
+        self.banned_js_engines = [NODE_JS] # node issue 1669, exception causes stdout not to be flushed
         Settings.CHECK_OVERFLOWS = 0
-        if Building.LLVM_OPTS: return self.skip("Our code is not exactly 'normal' llvm assembly")
 
         for name in glob.glob(path_from_root('tests', 'cases', '*.ll')):
           shortname = name.replace('.ll', '')
@@ -5552,6 +5587,9 @@ TT = %s
   del T # T is just a shape for the specific subclasses, we don't test it itself
 
   class other(RunnerCore):
+    def test_reminder(self):
+      assert 0, 'find appearances of i64 in src/, most are now unneeded'
+
     def test_emcc(self):
       emcc_debug = os.environ.get('EMCC_DEBUG')
 
@@ -5714,12 +5752,12 @@ Options that are modified or new in %s include:
         for params, test, text in [
           (['-s', 'INLINING_LIMIT=0'], lambda generated: 'function _dump' in generated, 'no inlining without opts'),
           (['-O1', '-s', 'INLINING_LIMIT=0'], lambda generated: 'function _dump' not in generated, 'inlining'),
-          (['-s', 'USE_TYPED_ARRAYS=0'], lambda generated: 'new Int32Array' not in generated, 'disable typed arrays'),
-          (['-s', 'USE_TYPED_ARRAYS=1'], lambda generated: 'IHEAPU = ' in generated, 'typed arrays 1 selected'),
+          (['-s', 'USE_TYPED_ARRAYS=0', '-s', 'I64_MODE=0'], lambda generated: 'new Int32Array' not in generated, 'disable typed arrays'),
+          (['-s', 'USE_TYPED_ARRAYS=1', '-s', 'I64_MODE=0'], lambda generated: 'IHEAPU = ' in generated, 'typed arrays 1 selected'),
           ([], lambda generated: 'Module["_dump"]' not in generated, 'dump is not exported by default'),
           (['-s', 'EXPORTED_FUNCTIONS=["_main", "_dump"]'], lambda generated: 'Module["_dump"]' in generated, 'dump is now exported'),
-          (['--typed-arrays', '0'], lambda generated: 'new Int32Array' not in generated, 'disable typed arrays'),
-          (['--typed-arrays', '1'], lambda generated: 'IHEAPU = ' in generated, 'typed arrays 1 selected'),
+          (['--typed-arrays', '0', '-s', 'I64_MODE=0'], lambda generated: 'new Int32Array' not in generated, 'disable typed arrays'),
+          (['--typed-arrays', '1', '-s', 'I64_MODE=0'], lambda generated: 'IHEAPU = ' in generated, 'typed arrays 1 selected'),
           (['--typed-arrays', '2'], lambda generated: 'new Uint16Array' in generated and 'new Uint32Array' in generated, 'typed arrays 2 selected'),
           (['--llvm-opts', '1'], lambda generated: '_puts(' in generated, 'llvm opts requested'),
         ]:
@@ -5856,7 +5894,7 @@ f.close()
       clear()
       output = Popen([EMCC, path_from_root('tests', 'hello_world_gles.c'), '-o', 'something.html',
                                            '-DHAVE_BUILTIN_SINCOS',
-                                           '-s', 'USE_TYPED_ARRAYS=0',
+                                           '-s', 'USE_TYPED_ARRAYS=0', '-s', 'I64_MODE=0',
                                            '--shell-file', path_from_root('tests', 'hello_world_gles_shell.html')],
                      stdout=PIPE, stderr=PIPE).communicate()
       assert len(output[0]) == 0, output[0]

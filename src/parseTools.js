@@ -129,9 +129,12 @@ function isIntImplemented(type) {
   return type[0] == 'i' || isPointerType(type);
 }
 
+// Note: works for iX types, not pointers (even though they are implemented as ints)
 function getBits(type) {
   if (!type || type[0] != 'i') return 0;
-  return parseInt(type.substr(1));
+  var left = type.substr(1);
+  if (!isNumber(left)) return 0;
+  return parseInt(left);
 }
 
 function isVoidType(type) {
@@ -530,18 +533,27 @@ function makeI64(low, high) {
   }
 }
 
+// XXX Make all i64 parts signed
+
 // Splits a number (an integer in a double, possibly > 32 bits) into an I64_MODE 1 i64 value.
-// Will suffer from rounding. margeI64 does the opposite.
-// TODO: optimize I64 calcs. For example, saving their parts as signed 32 as opposed to unsigned would help
+// Will suffer from rounding. mergeI64 does the opposite.
 function splitI64(value) {
   // We need to min here, since our input might be a double, and large values are rounded, so they can
   // be slightly higher than expected. And if we get 4294967296, that will turn into a 0 if put into a
   // HEAP32 or |0'd, etc.
-  return makeInlineCalculation(makeI64('VALUE>>>0', 'Math.min(Math.floor(VALUE/4294967296), 4294967295)'), value, 'tempBigIntP');
+  if (legalizedI64s) {
+    return [value + '>>>0', 'Math.min(Math.floor(' + value + '/4294967296), 4294967295)'];
+  } else {
+    return makeInlineCalculation(makeI64('VALUE>>>0', 'Math.min(Math.floor(VALUE/4294967296), 4294967295)'), value, 'tempBigIntP');
+  }
 }
 function mergeI64(value) {
   assert(I64_MODE == 1);
-  return makeInlineCalculation(RuntimeGenerator.makeBigInt('VALUE[0]', 'VALUE[1]'), value, 'tempI64');
+  if (legalizedI64s) {
+    return RuntimeGenerator.makeBigInt(value + '$0', value + '$1');
+  } else {
+    return makeInlineCalculation(RuntimeGenerator.makeBigInt('VALUE[0]', 'VALUE[1]'), value, 'tempI64');
+  }
 }
 
 // Takes an i64 value and changes it into the [low, high] form used in i64 mode 1. In that
@@ -646,10 +658,11 @@ function parseI64Constant(str) {
 
   if (!isNumber(str)) {
     // This is a variable. Copy it, so we do not modify the original
-    return makeCopyI64(str);
+    return legalizedI64s ? str : makeCopyI64(str);
   }
 
   var parsed = parseArbitraryInt(str, 64);
+  if (legalizedI64s) return parsed;
   return '[' + parsed[0] + ',' + parsed[1] + ']';
 }
 
@@ -888,11 +901,6 @@ function makeGetValue(ptr, pos, type, noNeedFirst, unsigned, ignore, align, noSa
             if (i < bytes-1) ret += '|';
           }
           ret = '(' + makeSignOp(ret, type, unsigned ? 'un' : 're', true);
-        } else {
-          assert(bytes == 8);
-          ret += 'tempBigInt=' + makeGetValue(ptr, pos, 'i32', noNeedFirst, true, ignore, align) + ',';
-          ret += 'tempBigInt2=' + makeGetValue(ptr, getFastValue(pos, '+', Runtime.getNativeTypeSize('i32')), 'i32', noNeedFirst, true, ignore, align) + ',';
-          ret += makeI64('tempBigInt', 'tempBigInt2');
         }
       } else {
         if (type == 'float') {
@@ -904,11 +912,6 @@ function makeGetValue(ptr, pos, type, noNeedFirst, unsigned, ignore, align, noSa
       ret += ')';
       return ret;
     }
-  }
-
-  if (type == 'i64' && I64_MODE == 1) {
-    return '[' + makeGetValue(ptr, pos, 'i32', noNeedFirst, 1, ignore) + ','
-               + makeGetValue(ptr, getFastValue(pos, '+', Runtime.getNativeTypeSize('i32')), 'i32', noNeedFirst, 1, ignore) + ']';
   }
 
   var offset = calcFastOffset(ptr, pos, noNeedFirst);
@@ -966,7 +969,8 @@ function makeSetValue(ptr, pos, value, type, noNeedFirst, ignore, align, noSafe,
             makeSetValue(ptr, getFastValue(pos, '+', Runtime.getNativeTypeSize('i32')), 'tempDoubleI32[1]', 'i32', noNeedFirst, ignore, align, noSafe, ',') + ')';
   }
 
-  var needSplitting = isIntImplemented(type) && !isPowerOfTwo(getBits(type)); // an unnatural type like i24
+  var bits = getBits(type);
+  var needSplitting = bits > 0 && !isPowerOfTwo(bits); // an unnatural type like i24
   if (USE_TYPED_ARRAYS == 2 && (align || needSplitting)) {
     // Alignment is important here, or we need to split this up for other reasons.
     var bytes = Runtime.getNativeTypeSize(type);
@@ -978,16 +982,12 @@ function makeSetValue(ptr, pos, value, type, noNeedFirst, ignore, align, noSafe,
           ret += 'tempBigInt=' + value + sep;
           ret += makeSetValue(ptr, pos, 'tempBigInt&0xffff', 'i16', noNeedFirst, ignore, 2) + sep;
           ret += makeSetValue(ptr, getFastValue(pos, '+', 2), 'tempBigInt>>16', 'i16', noNeedFirst, ignore, 2);
-        } else if (bytes != 8) {
+        } else {
           ret += 'tempBigInt=' + value + sep;
           for (var i = 0; i < bytes; i++) {
             ret += makeSetValue(ptr, getFastValue(pos, '+', i), 'tempBigInt&0xff', 'i8', noNeedFirst, ignore, 1);
             if (i < bytes-1) ret += sep + 'tempBigInt>>=8' + sep;
           }
-        } else { // bytes == 8, specific optimization
-          ret += 'tempPair=' + ensureI64_1(value) + sep;
-          ret += makeSetValue(ptr, pos, 'tempPair[0]', 'i32', noNeedFirst, ignore, align) + sep;
-          ret += makeSetValue(ptr, getFastValue(pos, '+', Runtime.getNativeTypeSize('i32')), 'tempPair[1]', 'i32', noNeedFirst, ignore, align);
         }
       } else {
         ret += makeSetValue('tempDoublePtr', 0, value, type, noNeedFirst, ignore, 8) + sep;
@@ -995,11 +995,6 @@ function makeSetValue(ptr, pos, value, type, noNeedFirst, ignore, align, noSafe,
       }
       return ret;
     }
-  }
-
-  if (type == 'i64' && I64_MODE == 1) {
-    return '(' + makeSetValue(ptr, pos, value + '[0]', 'i32', noNeedFirst, ignore) + ','
-               + makeSetValue(ptr, getFastValue(pos, '+', Runtime.getNativeTypeSize('i32')), value + '[1]', 'i32', noNeedFirst, ignore) + ')';
   }
 
   value = indexizeFunctions(value, type);
@@ -1530,6 +1525,8 @@ function isSignedOp(op, variant) {
   return op in SIGNED_OP || (variant && variant[0] == 's');
 }
 
+var legalizedI64s = USE_TYPED_ARRAYS == 2; // We do not legalize globals, but do legalize function lines. This will be true in the latter case
+
 function processMathop(item) {
   var op = item.op;
   var variant = item.variant;
@@ -1539,7 +1536,7 @@ function processMathop(item) {
     if (item['param'+i]) {
       paramTypes[i-1] = item['param'+i].type || type;
       item['ident'+i] = finalizeLLVMParameter(item['param'+i]);
-      if (!isNumber(item['ident'+i])) {
+      if (!isNumber(item['ident'+i]) && !isNiceIdent(item['ident'+i])) {
         item['ident'+i] = '(' + item['ident'+i] + ')'; // we may have nested expressions. So enforce the order of operations we want
       }
     } else {
@@ -1570,8 +1567,24 @@ function processMathop(item) {
 
   if ((type == 'i64' || paramTypes[0] == 'i64' || paramTypes[1] == 'i64' || ident2 == '(i64)') && I64_MODE == 1) {
     var warnI64_1 = function() {
-      warnOnce('Arithmetic on 64-bit integers in mode 1 is rounded and flaky, like mode 0, but much slower!');
+      warnOnce('Arithmetic on 64-bit integers in mode 1 is rounded and flaky, like mode 0!');
     };
+    // In ops that can be either legalized or not, we need to differentiate how we access low and high parts
+    var low1 = ident1 + (legalizedI64s ? '$0' : '[0]');
+    var high1 = ident1 + (legalizedI64s ? '$1' : '[1]');
+    var low2 = ident2 + (legalizedI64s ? '$0' : '[0]');
+    var high2 = ident2 + (legalizedI64s ? '$1' : '[1]');
+    function finish(result) {
+      // If this is in legalization mode, steal the assign and assign into two vars
+      if (legalizedI64s) {
+        assert(item.assignTo);
+        var ret = 'var ' + item.assignTo + '$0 = ' + result[0] + '; var ' + item.assignTo + '$1 = ' + result[1] + ';';
+        item.assignTo = null;
+        return ret;
+      } else {
+        return result;
+      }
+    }
     switch (op) {
       // basic integer ops
       case 'or': {
@@ -1587,7 +1600,7 @@ function processMathop(item) {
       case 'ashr':
       case 'lshr': {
         if (!isNumber(ident2)) {
-          return 'Runtime.bitshift64(' + ident1 + ',"' + op + '",' + stripCorrections(ident2) + '[0]|0)';
+          return 'Runtime.bitshift64(' + ident1 + '[0], ' + ident1 + '[1],"' + op + '",' + stripCorrections(ident2) + '[0]|0)';
         }
         bits = parseInt(ident2);
         var ander = Math.pow(2, bits)-1;
@@ -1623,38 +1636,28 @@ function processMathop(item) {
           }
         }
       }
-      case 'uitofp': case 'sitofp': return ident1 + '[0] + ' + ident1 + '[1]*4294967296';
-      case 'fptoui': case 'fptosi': return splitI64(ident1);
+      case 'uitofp': case 'sitofp': return low1 + ' + ' + high1 + '*4294967296';
+      case 'fptoui': case 'fptosi': return finish(splitI64(ident1));
       case 'icmp': {
         switch (variant) {
-          case 'uge': return ident1 + '[1] >= ' + ident2 + '[1] && (' + ident1 + '[1] > '  + ident2 + '[1] || ' +
-                                                                        ident1 + '[0] >= ' + ident2 + '[0])';
-          case 'sge': return '(' + ident1 + '[1]|0) >= (' + ident2 + '[1]|0) && ((' + ident1 + '[1]|0) >  ('  + ident2 + '[1]|0) || ' +
-                                                                                '(' + ident1 + '[0]|0) >= ('  + ident2 + '[0]|0))';
-          case 'ule': return ident1 + '[1] <= ' + ident2 + '[1] && (' + ident1 + '[1] < '  + ident2 + '[1] || ' +
-                                                                        ident1 + '[0] <= ' + ident2 + '[0])';
-          case 'sle': return '(' + ident1 + '[1]|0) <= (' + ident2 + '[1]|0) && ((' + ident1 + '[1]|0) <  (' + ident2 + '[1]|0) || ' +
-                                                                                '(' + ident1 + '[0]|0) <= (' + ident2 + '[0]|0))';
-          case 'ugt': return ident1 + '[1] > ' + ident2 + '[1] || (' + ident1 + '[1] == ' + ident2 + '[1] && ' +
-                                                                       ident1 + '[0] > '  + ident2 + '[0])';
-          case 'sgt': return '(' + ident1 + '[1]|0) > (' + ident2 + '[1]|0) || ((' + ident1 + '[1]|0) == (' + ident2 + '[1]|0) && ' +
-                                                                               '(' + ident1 + '[0]|0) >  (' + ident2 + '[0]|0))';
-          case 'ult': return ident1 + '[1] < ' + ident2 + '[1] || (' + ident1 + '[1] == ' + ident2 + '[1] && ' +
-                                                                       ident1 + '[0] < '  + ident2 + '[0])';
-          case 'slt': return '(' + ident1 + '[1]|0) < (' + ident2 + '[1]|0) || ((' + ident1 + '[1]|0) == (' + ident2 + '[1]|0) && ' +
-                                                                               '(' + ident1 + '[0]|0) <  (' + ident2 + '[0]|0))';
-          case 'ne': case 'eq': {
-            // We must sign them, so we do not compare -1 to 255 (could have unsigned them both too)
-            // since LLVM tells us if <=, >= etc. comparisons are signed, but not == and !=.
-            assert(paramTypes[0] == paramTypes[1]);
-            ident1 = makeSignOp(ident1, paramTypes[0], 're');
-            ident2 = makeSignOp(ident2, paramTypes[1], 're');
-            if (variant === 'eq') {
-              return ident1 + '[0] == ' + ident2 + '[0] && ' + ident1 + '[1] == ' + ident2 + '[1]';
-            } else {
-              return ident1 + '[0] != ' + ident2 + '[0] || ' + ident1 + '[1] != ' + ident2 + '[1]';
-            }
-          }
+          case 'uge': return high1 + ' >= ' + high2 + ' && (' + high1 + ' > '  + high + ' || ' +
+                                                                low1 + ' >= ' + low2 + ')';
+          case 'sge': return '(' + high1 + '|0) >= (' + high2 + '|0) && ((' + high1 + '|0) >  ('  + high2 + '|0) || ' +
+                                                                        '(' + low1 + '|0) >= ('  + low2 + '|0))';
+          case 'ule': return high1 + ' <= ' + high2 + ' && (' + high1 + ' < '  + high2 + ' || ' +
+                                                                low1 + ' <= ' + low2 + ')';
+          case 'sle': return '(' + high1 + '|0) <= (' + high2 + '|0) && ((' + high1 + '|0) <  (' + high2 + '|0) || ' +
+                                                                        '(' + low1 + '|0) <= (' + low2 + '|0))';
+          case 'ugt': return high1 + ' > ' + high2 + ' || (' + high1 + ' == ' + high2 + ' && ' +
+                                                               low1 + ' > '  + low2 + ')';
+          case 'sgt': return '(' + high1 + '|0) > (' + high2 + '|0) || ((' + high1 + '|0) == (' + high2 + '|0) && ' +
+                                                                       '(' + low1 + '|0) >  (' + low2 + '|0))';
+          case 'ult': return high1 + ' < ' + high2 + ' || (' + high1 + ' == ' + high2 + ' && ' +
+                                                               low1 + ' < '  + low2 + ')';
+          case 'slt': return '(' + high1 + '|0) < (' + high2 + '|0) || ((' + high1 + '|0) == (' + high2 + '|0) && ' +
+                                                                       '(' + low1 + '|0) <  (' + low2 + '|0))';
+          case 'ne':  return low1 + ' != ' + low2 + ' || ' + high1 + ' != ' + high2 + '';
+          case 'eq':  return low1 + ' == ' + low2 + ' && ' + high1 + ' == ' + high2 + '';
           default: throw 'Unknown icmp variant: ' + variant;
         }
       }
@@ -1667,11 +1670,11 @@ function processMathop(item) {
       case 'ptrtoint': return makeI64(ident1, 0);
       case 'inttoptr': return '(' + ident1 + '[0])'; // just directly truncate the i64 to a 'pointer', which is an i32
       // Dangerous, rounded operations. TODO: Fully emulate
-      case 'add': warnI64_1(); return handleOverflow(splitI64(mergeI64(ident1) + '+' + mergeI64(ident2)), bits);
-      case 'sub': warnI64_1(); return handleOverflow(splitI64(mergeI64(ident1) + '-' + mergeI64(ident2)), bits);
-      case 'sdiv': case 'udiv': warnI64_1(); return splitI64(makeRounding(mergeI64(ident1) + '/' + mergeI64(ident2), bits, op[0] === 's'));
-      case 'mul': warnI64_1(); return handleOverflow(splitI64(mergeI64(ident1) + '*' + mergeI64(ident2)), bits);
-      case 'urem': case 'srem': warnI64_1(); return splitI64(mergeI64(ident1) + '%' + mergeI64(ident2));
+      case 'add': warnI64_1(); return finish(splitI64(mergeI64(ident1) + '+' + mergeI64(ident2)));
+      case 'sub': warnI64_1(); return finish(splitI64(mergeI64(ident1) + '-' + mergeI64(ident2)));
+      case 'sdiv': case 'udiv': warnI64_1(); return finish(splitI64(makeRounding(mergeI64(ident1) + '/' + mergeI64(ident2), bits, op[0] === 's')));
+      case 'mul': warnI64_1(); return finish(splitI64(mergeI64(ident1) + '*' + mergeI64(ident2)));
+      case 'urem': case 'srem': warnI64_1(); return finish(splitI64(mergeI64(ident1) + '%' + mergeI64(ident2)));
       case 'bitcast': {
         // Pointers are not 64-bit, so there is really only one possible type of bitcast here, int to float or vice versa
         assert(USE_TYPED_ARRAYS == 2, 'Can only bitcast ints <-> floats with typed arrays mode 2');
@@ -1831,6 +1834,7 @@ function walkInterdata(item, pre, post, obj) {
   var originalObj = obj;
   if (obj && obj.replaceWith) obj = obj.replaceWith; // allow pre to replace the object we pass to all its children
   if (item.value && walkInterdata(item.value, pre, post,  obj)) return true;
+  // TODO if (item.pointer && walkInterdata(item.pointer, pre, post,  obj)) return true;
   if (item.dependent && walkInterdata(item.dependent, pre, post,  obj)) return true;
   var i;
   for (i = 1; i <= 4; i++) {
@@ -1849,6 +1853,29 @@ function walkInterdata(item, pre, post, obj) {
     }
   }
   return post && post(item, originalObj, obj);
+}
+
+// Separate from walkInterdata so that the former is as fast as possible
+// If the callback returns a value, we replace the current item with that
+// value, and do *not* walk the children.
+function walkAndModifyInterdata(item, pre) {
+  if (!item || !item.intertype) return false;
+  var ret = pre(item);
+  if (ret) return ret;
+  var repl;
+  if (item.value && (repl = walkAndModifyInterdata(item.value, pre))) item.value = repl;
+  if (item.pointer && (repl = walkAndModifyInterdata(item.pointer, pre))) item.pointer = repl;
+  if (item.dependent && (repl = walkAndModifyInterdata(item.dependent, pre))) item.dependent = repl;
+  var i;
+  for (i = 1; i <= 4; i++) {
+    if (item['param'+i] && (repl = walkAndModifyInterdata(item['param'+i], pre))) item['param'+i] = repl;
+  }
+  if (item.params) {
+    for (i = 0; i <= item.params.length; i++) {
+      if (repl = walkAndModifyInterdata(item.params[i], pre)) item.params[i] = repl;
+    }
+  }
+  // Ignore possibleVars because we can't replace them anyhow
 }
 
 function parseBlockAddress(segment) {
