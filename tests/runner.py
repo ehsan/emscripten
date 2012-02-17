@@ -653,6 +653,31 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
 
         self.do_run(src, '*1*\n*0*\n*0*\n')
 
+    def test_i64_b(self):
+        if Settings.USE_TYPED_ARRAYS != 2: return self.skip('full i64 stuff only in ta2')
+
+        src = r'''
+          #include <stdio.h>
+          #include <sys/time.h>
+
+          typedef long long int64;
+
+          #define PRMJ_USEC_PER_SEC       1000000L
+
+          int main(int argc, char * argv[]) {
+              int64 sec = 1329409675 + argc;
+              int64 usec = 2329509675;
+              int64 mul = int64(sec) * PRMJ_USEC_PER_SEC;
+              int64 add = mul + int64(usec);
+              int add_low = add;
+              int add_high = add >> 32;
+              printf("*%lld,%lld,%u,%u*\n", mul, add, add_low, add_high);
+              return 0;
+          }
+        '''
+
+        self.do_run(src, '*1329409676000000,1329412005509675,3663280683,309527*\n')
+
     def test_unaligned(self):
         if Settings.QUANTUM_SIZE == 1: return self.skip('No meaning to unaligned addresses in q1')
 
@@ -2448,6 +2473,27 @@ def process(filename):
         '''
 
         self.do_run(src, '*1*', force_c=True)
+
+    def test_atexit(self):
+      # Confirms they are called in reverse order
+      src = r'''
+        #include <stdio.h>
+        #include <stdlib.h>
+        
+        static void cleanA() {
+          printf("A");
+        }
+        static void cleanB() {
+          printf("B");
+        }
+        
+        int main() {
+          atexit(cleanA);
+          atexit(cleanB);
+          return 0;
+        }
+        '''
+      self.do_run(src, 'BA')
 
     def test_time(self):
       # XXX Not sure what the right output is here. Looks like the test started failing with daylight savings changes. Modified it to pass again.
@@ -5646,7 +5692,7 @@ Options that are modified or new in %s include:
 
         # emcc src.cpp -c    and   emcc src.cpp -o src.[o|bc] ==> should give a .bc file
         #      regression check: -o js should create "js", with bitcode content
-        for args in [['-c'], ['-o', 'src.o'], ['-o', 'src.bc'], ['-o', 'js']]:
+        for args in [['-c'], ['-o', 'src.o'], ['-o', 'src.bc'], ['-o', 'src.so'], ['-o', 'js']]:
           target = args[1] if len(args) == 2 else 'hello_world.o'
           clear()
           Popen([compiler, path_from_root('tests', 'hello_world' + suffix)] + args, stdout=PIPE, stderr=PIPE).communicate()
@@ -5659,6 +5705,16 @@ Options that are modified or new in %s include:
           assert len(output[0]) == 0, output[0]
           assert os.path.exists(target + '.js'), 'Expected %s to exist since args are %s : %s' % (target + '.js', str(args), '\n'.join(output))
           self.assertContained('hello, world!', run_js(target + '.js'))
+
+        # handle singleton archives
+        clear()
+        Popen([compiler, path_from_root('tests', 'hello_world' + suffix), '-o', 'a.bc'], stdout=PIPE, stderr=PIPE).communicate()
+        Popen([LLVM_AR, 'r', 'a.a', 'a.bc'], stdout=PIPE, stderr=PIPE).communicate()
+        assert os.path.exists('a.a')
+        shutil.copyfile('a.a', '/home/alon/a.a')
+        output = Popen([compiler, 'a.a']).communicate()
+        assert os.path.exists('a.out.js'), output
+        self.assertContained('hello, world!', run_js('a.out.js'))
 
         # emcc src.ll ==> generates .js
         clear()
@@ -6106,7 +6162,7 @@ elif 'benchmark' in str(sys.argv):
       '''
       self.do_benchmark(src, [], 'final: 720.')
 
-    def test_files(self):
+    def zzztest_files(self):
       src = r'''
         #include<stdio.h>
         #include<stdlib.h>

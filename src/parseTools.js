@@ -542,7 +542,7 @@ function splitI64(value) {
   // be slightly higher than expected. And if we get 4294967296, that will turn into a 0 if put into a
   // HEAP32 or |0'd, etc.
   if (legalizedI64s) {
-    return [value + '>>>0', 'Math.min(Math.floor(' + value + '/4294967296), 4294967295)'];
+    return [value + '>>>0', 'Math.min(Math.floor((' + value + ')/4294967296), 4294967295)'];
   } else {
     return makeInlineCalculation(makeI64('VALUE>>>0', 'Math.min(Math.floor(VALUE/4294967296), 4294967295)'), value, 'tempBigIntP');
   }
@@ -602,6 +602,22 @@ function parseArbitraryInt(str, bits) {
     }
   }
 
+  function mul2(v) { // v *= 2
+    for (var i = v.length-1; i >= 0; i--) {
+      var d = v[i]*2;
+      r = d >= 10;
+      v[i] = d%10;
+      var j = i-1;
+      if (r) {
+        if (j < 0) {
+          v.unshift(1);
+          break;
+        }
+        v[j] += 0.5; // will be multiplied
+      }
+    }
+  }
+
   function subtract(v, w) { // v -= w. we assume v >= w
     while (v.length > w.length) w.splice(0, 0, 0);
     for (var i = 0; i < v.length; i++) {
@@ -631,9 +647,11 @@ function parseArbitraryInt(str, bits) {
 
   if (str[0] == '-') {
     // twos-complement is needed
-    assert(bits == 64, "we only support 64-bit two's complement so far");
     str = str.substr(1);
-    v = str2vec('18446744073709551616'); // 2^64
+    v = str2vec('1');
+    for (var i = 0; i < bits; i++) {
+      mul2(v);
+    }
     subtract(v, str2vec(str));
   } else {
     v = str2vec(str);
@@ -1640,7 +1658,7 @@ function processMathop(item) {
       case 'fptoui': case 'fptosi': return finish(splitI64(ident1));
       case 'icmp': {
         switch (variant) {
-          case 'uge': return high1 + ' >= ' + high2 + ' && (' + high1 + ' > '  + high + ' || ' +
+          case 'uge': return high1 + ' >= ' + high2 + ' && (' + high1 + ' > '  + high2 + ' || ' +
                                                                 low1 + ' >= ' + low2 + ')';
           case 'sge': return '(' + high1 + '|0) >= (' + high2 + '|0) && ((' + high1 + '|0) >  ('  + high2 + '|0) || ' +
                                                                         '(' + low1 + '|0) >= ('  + low2 + '|0))';

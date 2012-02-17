@@ -243,6 +243,9 @@ BITCODE_SUFFIXES = ('.bc', '.o')
 SHAREDLIB_SUFFIXES = ('.dylib', '.so', '.dll')
 ASSEMBLY_SUFFIXES = ('.ll',)
 
+def suffix(name):
+  return name.split('.')[:-1]
+
 def unsuffixed(name):
   return '.'.join(name.split('.')[:-1])
 
@@ -460,6 +463,8 @@ try:
           shared.Building.llvm_as(input_file, temp_file)
           temp_files.append(temp_file)
 
+  if not LEAVE_INPUTS_RAW: assert len(temp_files) == len(input_files)
+
   # If we were just asked to generate bitcode, stop there
   if final_suffix not in ['js', 'html']:
     if llvm_opts > 0:
@@ -534,8 +539,8 @@ try:
                                                ('dlmalloc', create_dlmalloc, fix_dlmalloc, dlmalloc_symbols)]:
       need = []
       has = []
-      for input_file in input_files:
-        symbols = shared.Building.llvm_nm(in_temp(unsuffixed_basename(input_file) + '.o'))
+      for temp_file in temp_files:
+        symbols = shared.Building.llvm_nm(temp_file)
         for library_symbol in library_symbols:
           if library_symbol in symbols.undefs:
             need.append(library_symbol)
@@ -550,16 +555,17 @@ try:
         if fix:
           fix()
 
-  # First, combine the bitcode files if there are several
-  if len(input_files) + len(extra_files_to_link) > 1:
-    linker_inputs = map(lambda input_file: in_temp(unsuffixed_basename(input_file) + '.o'), input_files) + extra_files_to_link
+  # First, combine the bitcode files if there are several. We must also link if we have a singleton .a
+  if len(input_files) + len(extra_files_to_link) > 1 or \
+     (not LEAVE_INPUTS_RAW and not (suffix(temp_files[0]) in BITCODE_SUFFIXES or suffix(temp_files[0]) in SHAREDLIB_SUFFIXES) and shared.Building.is_ar(temp_files[0])):
+    linker_inputs = temp_files + extra_files_to_link
     if DEBUG: print >> sys.stderr, 'emcc: linking: ', linker_inputs
     shared.Building.link(linker_inputs,
                          in_temp(target_basename + '.bc'))
     final = in_temp(target_basename + '.bc')
   else:
     if not LEAVE_INPUTS_RAW:
-      shutil.move(in_temp(unsuffixed_basename(input_files[0]) + '.o'), in_temp(target_basename + '.bc'))
+      shutil.move(temp_files[0], in_temp(target_basename + '.bc'))
       final = in_temp(target_basename + '.bc')
     else:
       final = input_files[0]
@@ -654,10 +660,10 @@ try:
     if DEBUG: save_intermediate('eliminator')
 
     # js optimizer pre-pass
-    js_optimizer_queue += ['simplifyExpressionsPre', 'optimizeShiftsConservative']
-    ###js_optimizer_queue += ['optimizeShiftsAggressive']
-    ###final = shared.Building.eliminator(final) # aggressive shifts optimization introduces some new variables, remove ones that we can
-    ###if DEBUG: save_intermediate('eliminator')
+    js_optimizer_queue += ['simplifyExpressionsPre', 'optimizeShiftsAggressive']
+    flush_js_optimizer_queue()
+    final = shared.Building.eliminator(final) # aggressive shifts optimization introduces some new variables, remove ones that we can
+    if DEBUG: save_intermediate('eliminator')
 
   if closure:
     flush_js_optimizer_queue()
